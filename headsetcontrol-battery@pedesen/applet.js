@@ -1,7 +1,10 @@
 const Applet = imports.ui.applet;
-const GLib = imports.gi.GLib;
+const Gio = imports.gi.Gio;
 const Mainloop = imports.mainloop;
 const Lang = imports.lang;
+
+const LABEL_PREFIX = "🎧 ";
+const HEADSETCONTROL_BIN = "headsetcontrol";
 
 function HeadsetcontrolBattery(orientation, panel_height, instance_id) {
   this._init(orientation, panel_height, instance_id);
@@ -19,40 +22,89 @@ HeadsetcontrolBattery.prototype = {
     );
 
     this.set_applet_tooltip(_("Battery Status"));
-    this.set_applet_label("--");
+    this.set_applet_label(LABEL_PREFIX + "--");
     this._update_loop();
   },
 
   on_applet_removed_from_panel: function () {
     if (this._updateLoopID) {
       Mainloop.source_remove(this._updateLoopID);
+      this._updateLoopID = null;
+    }
+    if (this._cancellable) {
+      this._cancellable.cancel();
     }
   },
 
-  _run_cmd: function (command) {
+  _run_cmd_async: function (argv, callback) {
     try {
-      let [result, stdout, stderr] = GLib.spawn_command_line_sync(command);
-      if (stdout != null) {
-        return stdout.toString();
+      let proc = new Gio.Subprocess({
+        argv: argv,
+        flags: Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_SILENCE,
+      });
+      proc.init(null);
+
+      if (this._cancellable) {
+        this._cancellable.cancel();
       }
+      this._cancellable = new Gio.Cancellable();
+
+      proc.communicate_utf8_async(null, this._cancellable, (proc, res) => {
+        try {
+          let [, stdout] = proc.communicate_utf8_finish(res);
+          callback(stdout || "");
+        } catch (e) {
+          if (!e.matches || !e.matches(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+            global.logError(e);
+          }
+          callback("");
+        }
+      });
     } catch (e) {
       global.logError(e);
+      callback("");
     }
-
-    return "";
   },
 
   _get_status: function () {
-    const match = this._run_cmd("headsetcontrol -b").match(/Battery: (.*)/);
-    const status = match ? match[1] : null;
+    this._run_cmd_async(
+      [HEADSETCONTROL_BIN, "-b", "-o", "json"],
+      Lang.bind(this, function (output) {
+        let label = "off";
+        let tooltip = "Headset off or disconnected";
+        try {
+          let data = JSON.parse(output);
+          let device = data.devices && data.devices[0];
+          if (!device) {
+            tooltip = "No headset detected";
+          } else if (device.status !== "success") {
+            tooltip = `Headset error: ${device.status}`;
+          } else {
+            let battery = device.battery;
+            switch (battery.status) {
+              case "BATTERY_CHARGING":
+                label = battery.level >= 0 ? `Chg ${battery.level}%` : "Chg";
+                tooltip = "Charging";
+                break;
+              case "BATTERY_AVAILABLE":
+                label = `${battery.level}%`;
+                tooltip = `Battery: ${battery.level}%`;
+                break;
+              case "BATTERY_UNAVAILABLE":
+                label = "N/A";
+                tooltip = "Battery status unavailable";
+                break;
+            }
+          }
+        } catch (e) {
+          label = "Error";
+          tooltip = `headsetcontrol command failed: ${String(e)}`;
+        }
 
-    if (status === null) {
-      this.set_applet_label("off");
-      this.set_applet_tooltip(_(`Off`));
-    } else {
-      this.set_applet_label(status === "Charging" ? "Chg" : status);
-      this.set_applet_tooltip(_(`Battery: ${status}`));
-    }
+        this.set_applet_label(LABEL_PREFIX + label);
+        this.set_applet_tooltip(_(tooltip));
+      })
+    );
   },
 
   _update_loop: function () {

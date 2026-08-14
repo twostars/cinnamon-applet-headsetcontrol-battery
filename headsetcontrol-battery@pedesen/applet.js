@@ -5,6 +5,7 @@ const Lang = imports.lang;
 
 const LABEL_PREFIX = "🎧 ";
 const HEADSETCONTROL_BIN = "headsetcontrol";
+const BATTERY_LOW_PERCENT = 10;
 
 function HeadsetcontrolBattery(orientation, panel_height, instance_id) {
   this._init(orientation, panel_height, instance_id);
@@ -72,6 +73,7 @@ HeadsetcontrolBattery.prototype = {
       Lang.bind(this, function (output) {
         let label = "off";
         let tooltip = "Headset off or disconnected";
+        let batteryLow = false;
         try {
           let data = JSON.parse(output);
           let device = data.devices && data.devices[0];
@@ -83,12 +85,19 @@ HeadsetcontrolBattery.prototype = {
             let battery = device.battery;
             switch (battery.status) {
               case "BATTERY_CHARGING":
-                label = battery.level >= 0 ? `Chg ${battery.level}%` : "Chg";
+                // The level isn't always available for all headsets; in this case it becomes -1.
+                if (battery.level >= 0)  {
+                  label = `Chg ${battery.level}%`;
+                  batteryLow = battery.level <= BATTERY_LOW_PERCENT;
+                } else {
+                  label = "Chg";
+                }
                 tooltip = "Charging";
                 break;
               case "BATTERY_AVAILABLE":
                 label = `${battery.level}%`;
                 tooltip = `Battery: ${battery.level}%`;
+                batteryLow = battery.level <= BATTERY_LOW_PERCENT;
                 break;
               case "BATTERY_UNAVAILABLE":
                 label = "N/A";
@@ -103,6 +112,9 @@ HeadsetcontrolBattery.prototype = {
 
         this.set_applet_label(LABEL_PREFIX + label);
         this.set_applet_tooltip(_(tooltip));
+
+        if (this._applet_label)
+          this._applet_label.set_style(batteryLow ? "color: #ff0000;" : "");
       })
     );
   },

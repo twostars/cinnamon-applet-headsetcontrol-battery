@@ -80,7 +80,7 @@ HeadsetcontrolBattery.prototype = {
           if (!device) {
             tooltip = "No headset detected";
           } else if (device.status !== "success") {
-            tooltip = `Headset error: ${device.status}`;
+            tooltip = `Headset error: ${device.status} ${device.device}`;
           } else {
             let battery = device.battery;
             switch (battery.status) {
@@ -92,16 +92,16 @@ HeadsetcontrolBattery.prototype = {
                 } else {
                   label = "Chg";
                 }
-                tooltip = "Charging";
+                tooltip = `Charging (${device.device})`;
                 break;
               case "BATTERY_AVAILABLE":
                 label = `${battery.level}%`;
-                tooltip = `Battery: ${battery.level}%`;
+                tooltip = `Battery: ${battery.level}% (${device.device})`;
                 batteryLow = battery.level <= BATTERY_LOW_PERCENT;
                 break;
               case "BATTERY_UNAVAILABLE":
                 label = "N/A";
-                tooltip = "Battery status unavailable";
+                tooltip = `Battery status unavailable (${device.device})`;
                 break;
             }
           }
